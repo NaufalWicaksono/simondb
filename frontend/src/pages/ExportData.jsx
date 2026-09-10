@@ -3,6 +3,7 @@ import {
   Download, FileSpreadsheet, Database, Table as TableIcon,
   RefreshCw, CheckCircle2, AlertTriangle, Info, CheckSquare, Square, Columns3,
   Eye, Maximize2, X as XIcon, Loader2, LayoutList, Filter, Plus, Tag, Search,
+  GripVertical, RotateCcw,
 } from 'lucide-react';
 import { fetchExport, fetchMetadataTables, fetchMetadataColumns, fetchExportPreview, fetchColumnValues } from '../services/api.js';
 import { TABLE_FRIENDLY_LABELS } from './Dashboard.jsx';
@@ -206,9 +207,19 @@ export default function ExportData() {
   const [tables, setTables] = useState([]);
   const [selectedTable, setSelectedTable] = useState('');
   const [columns, setColumns] = useState([]);
+  const [originalColumns, setOriginalColumns] = useState([]);
   const [selectedColumns, setSelectedColumns] = useState([]);
   const [activeFilters, setActiveFilters] = useState([]);
   const [showAddFilter, setShowAddFilter] = useState(false);
+
+  // Drag & drop state untuk daftar Pilih Kolom
+  const [draggedIndex, setDraggedIndex] = useState(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
+  const isDraggingRef = useRef(false);
+
+  // Drag & drop state untuk header tabel preview
+  const [thDraggedIdx, setThDraggedIdx] = useState(null);
+  const [thDragOverIdx, setThDragOverIdx] = useState(null);
 
   const [previewData, setPreviewData] = useState(null);
   const [isLoadingTables, setIsLoadingTables] = useState(true);
@@ -240,6 +251,7 @@ export default function ExportData() {
       .then((res) => {
         const cols = res.columns_with_meta || res.columns?.map(c => ({ name: c, category: 'string' })) || [];
         setColumns(cols);
+        setOriginalColumns(cols);
         setSelectedColumns(cols.map(c => c.name));
       })
       .catch((err) => setStatusMsg({ type: 'error', text: err.message }))
@@ -259,7 +271,10 @@ export default function ExportData() {
     if (selectedColumns.includes(colName)) {
       setSelectedColumns(selectedColumns.filter((c) => c !== colName));
     } else {
-      setSelectedColumns([...selectedColumns, colName]);
+      const newSelected = columns
+        .map(c => c.name)
+        .filter(c => selectedColumns.includes(c) || c === colName);
+      setSelectedColumns(newSelected);
     }
   };
 
@@ -269,6 +284,108 @@ export default function ExportData() {
     } else {
       setSelectedColumns(columns.map((c) => c.name));
     }
+  };
+
+  // Drag & drop handlers untuk list "Pilih Kolom"
+  const handleDragStart = (e, index) => {
+    setDraggedIndex(index);
+    isDraggingRef.current = true;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(index));
+  };
+
+  const handleDragOver = (e, index) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverIndex !== index) {
+      setDragOverIndex(index);
+    }
+  };
+
+  const handleDrop = (e, targetIndex) => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === targetIndex) {
+      setDraggedIndex(null);
+      setDragOverIndex(null);
+      setTimeout(() => { isDraggingRef.current = false; }, 50);
+      return;
+    }
+
+    const newColumns = Array.from(columns);
+    const [movedCol] = newColumns.splice(draggedIndex, 1);
+    newColumns.splice(targetIndex, 0, movedCol);
+    setColumns(newColumns);
+
+    // Sinkronisasi urutan selectedColumns agar preview tabel & ekspor mengikuti urutan baru
+    const newSelected = newColumns
+      .map(c => c.name)
+      .filter(name => selectedColumns.includes(name));
+    setSelectedColumns(newSelected);
+
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+    setTimeout(() => { isDraggingRef.current = false; }, 50);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+    setTimeout(() => { isDraggingRef.current = false; }, 50);
+  };
+
+  const handleResetColumnOrder = () => {
+    if (originalColumns.length > 0) {
+      setColumns([...originalColumns]);
+      const resetSelected = originalColumns
+        .map(c => c.name)
+        .filter(name => selectedColumns.includes(name));
+      setSelectedColumns(resetSelected);
+    }
+  };
+
+  // Drag & drop handlers langsung di header tabel preview
+  const handleThDragStart = (e, index) => {
+    setThDraggedIdx(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(index));
+  };
+
+  const handleThDragOver = (e, index) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (thDragOverIdx !== index) {
+      setThDragOverIdx(index);
+    }
+  };
+
+  const handleThDrop = (e, targetIndex) => {
+    e.preventDefault();
+    if (thDraggedIdx === null || thDraggedIdx === targetIndex) {
+      setThDraggedIdx(null);
+      setThDragOverIdx(null);
+      return;
+    }
+
+    const newSelected = Array.from(selectedColumns);
+    const [movedName] = newSelected.splice(thDraggedIdx, 1);
+    newSelected.splice(targetIndex, 0, movedName);
+    setSelectedColumns(newSelected);
+
+    // Sinkronisasi daftar columns di sisi kiri
+    const selectedSet = new Set(newSelected);
+    const reorderedCols = [
+      ...newSelected.map(name => columns.find(c => c.name === name)).filter(Boolean),
+      ...columns.filter(c => !selectedSet.has(c.name))
+    ];
+    setColumns(reorderedCols);
+
+    setThDraggedIdx(null);
+    setThDragOverIdx(null);
+  };
+
+  const handleThDragEnd = () => {
+    setThDraggedIdx(null);
+    setThDragOverIdx(null);
   };
 
   const handleExportDownload = async () => {
@@ -341,36 +458,96 @@ export default function ExportData() {
             </select>
           </div>
 
-          {/* Step 2: Column Selection */}
+          {/* Step 2: Column Selection & Drag Reorder */}
           <div className="card p-5 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 font-bold text-slate-900 text-sm">
                 <Columns3 size={16} className="text-emerald-600" />
                 <span>2. Pilih Kolom ({selectedColumns.length}/{columns.length})</span>
               </div>
-              <button
-                onClick={handleSelectAllCols}
-                className="text-xs text-emerald-600 font-semibold hover:underline"
-              >
-                {selectedColumns.length === columns.length ? 'Batal Semua' : 'Pilih Semua'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleResetColumnOrder}
+                  className="text-xs text-slate-400 hover:text-slate-600 font-medium flex items-center gap-1 transition-colors"
+                  title="Kembalikan urutan kolom sesuai tabel asli"
+                >
+                  <RotateCcw size={12} />
+                  <span>Reset</span>
+                </button>
+                <span className="text-slate-200">|</span>
+                <button
+                  type="button"
+                  onClick={handleSelectAllCols}
+                  className="text-xs text-emerald-600 font-semibold hover:underline"
+                >
+                  {selectedColumns.length === columns.length ? 'Batal Semua' : 'Pilih Semua'}
+                </button>
+              </div>
             </div>
 
-            <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
-              {columns.map((col) => {
+            <p className="text-[11px] text-slate-400 flex items-center gap-1.5 leading-snug">
+              <GripVertical size={13} className="text-slate-400 shrink-0" />
+              <span>Tarik & lepas (drag & drop) untuk mengatur susunan kolom.</span>
+            </p>
+
+            <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
+              {columns.map((col, idx) => {
                 const isChecked = selectedColumns.includes(col.name);
+                const isItemDragged = draggedIndex === idx;
+                const isItemDragOver = dragOverIndex === idx;
+
                 return (
                   <div
                     key={col.name}
-                    onClick={() => handleToggleColumn(col.name)}
-                    className="flex items-center justify-between p-2 rounded-lg bg-slate-50 hover:bg-slate-100 cursor-pointer text-xs transition-colors"
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, idx)}
+                    onDragOver={(e) => handleDragOver(e, idx)}
+                    onDrop={(e) => handleDrop(e, idx)}
+                    onDragEnd={handleDragEnd}
+                    onClick={() => {
+                      if (!isDraggingRef.current) {
+                        handleToggleColumn(col.name);
+                      }
+                    }}
+                    className={`group flex items-center justify-between p-2 rounded-xl text-xs transition-all select-none cursor-grab active:cursor-grabbing border ${
+                      isItemDragged
+                        ? 'opacity-30 border-dashed border-emerald-500 bg-emerald-50/50 scale-[0.98]'
+                        : isItemDragOver
+                        ? 'border-emerald-500 bg-emerald-50 shadow-sm scale-[1.01]'
+                        : isChecked
+                        ? 'bg-slate-50 hover:bg-slate-100/90 border-slate-200/70 shadow-2xs'
+                        : 'bg-white hover:bg-slate-50 border-slate-100 opacity-60'
+                    }`}
                   >
-                    <span className="font-medium text-slate-700">{col.name}</span>
-                    <span className={`w-4 h-4 rounded flex items-center justify-center border ${
-                      isChecked ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-300 bg-white'
-                    }`}>
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <div
+                        className="p-0.5 text-slate-300 group-hover:text-slate-600 transition-colors shrink-0"
+                        title="Tarik untuk memindahkan urutan"
+                      >
+                        <GripVertical size={14} />
+                      </div>
+                      <span className="font-mono text-[10px] text-slate-400 w-4 text-center shrink-0">
+                        {idx + 1}
+                      </span>
+                      <span className={`truncate font-medium ${isChecked ? 'text-slate-800 font-semibold' : 'text-slate-400 line-through'}`}>
+                        {col.name}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleColumn(col.name);
+                      }}
+                      className={`w-4 h-4 rounded flex items-center justify-center border shrink-0 transition-colors ${
+                        isChecked ? 'bg-emerald-600 border-emerald-600 text-white shadow-xs' : 'border-slate-300 bg-white hover:border-slate-400'
+                      }`}
+                      title={isChecked ? 'Nonaktifkan kolom' : 'Aktifkan kolom'}
+                    >
                       {isChecked && '✓'}
-                    </span>
+                    </button>
                   </div>
                 );
               })}
@@ -475,6 +652,9 @@ export default function ExportData() {
               <div className="flex items-center gap-2 text-xs font-bold text-slate-800">
                 <Eye size={15} className="text-emerald-600" />
                 <span>Preview Data (10 Baris Pertama)</span>
+                <span className="text-[10px] font-normal text-slate-400 hidden sm:inline">
+                  — Urutan kolom dapat digeser langsung pada header
+                </span>
               </div>
               {previewData && (
                 <span className="text-xs text-slate-500 font-medium">
@@ -497,9 +677,32 @@ export default function ExportData() {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      {selectedColumns.map((col) => (
-                        <th key={col}>{col}</th>
-                      ))}
+                      {selectedColumns.map((col, idx) => {
+                        const isThDragged = thDraggedIdx === idx;
+                        const isThDragOver = thDragOverIdx === idx;
+
+                        return (
+                          <th
+                            key={col}
+                            draggable
+                            onDragStart={(e) => handleThDragStart(e, idx)}
+                            onDragOver={(e) => handleThDragOver(e, idx)}
+                            onDrop={(e) => handleThDrop(e, idx)}
+                            onDragEnd={handleThDragEnd}
+                            className={`cursor-grab active:cursor-grabbing select-none transition-all group/th ${
+                              isThDragOver
+                                ? 'bg-emerald-100 text-emerald-900 border-l-2 border-emerald-600'
+                                : ''
+                            } ${isThDragged ? 'opacity-30' : ''}`}
+                            title="Tarik kolom ini ke kiri/kanan untuk mengubah urutan"
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <GripVertical size={12} className="text-slate-300 group-hover/th:text-slate-600 transition-colors shrink-0" />
+                              <span>{col}</span>
+                            </div>
+                          </th>
+                        );
+                      })}
                     </tr>
                   </thead>
                   <tbody>
