@@ -1,0 +1,31 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: simondb-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/simondb.sqlite:/app/simondb.sqlite
+    environment:
+      - APP_ENV=development
+      - FRONTEND_URL=http://localhost:5177
+      - DATABASE_URL=sqlite:///./simondb.sqlite
+      - SUPER_ADMIN_NAME=Super Admin Demo
+      - SUPER_ADMIN_USERNAME=superadmin
+      - SUPER_ADMIN_EMAIL=admin@simondb.demo
+      - SUPER_ADMIN_PASSWORD=Admin123!
+      - JWT_SECRET_KEY=simondb_demo_super_secret_jwt_key_2026_change_in_production
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: simondb-frontend
+    restart: unless-stopped
+    ports:
+      - "5177:80"
+    depends_on:
+      - backend
